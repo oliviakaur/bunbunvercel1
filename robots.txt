@@ -1,0 +1,20 @@
+# Allow Google web crawler
+User-agent: Googlebot
+Allow: /
+
+# Allow Google Image crawler
+User-agent: Googlebot-Image
+Allow: /
+
+# Allow Microsoft Bing crawler
+User-agent: Bingbot
+Allow: /
+
+# Allow Yandex crawler
+User-agent: YandexBot
+Allow: /
+
+# Allow Baidu crawler
+User-agent: Baiduspider
+Allow: /
+
