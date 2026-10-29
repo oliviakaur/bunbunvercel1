@@ -1,0 +1,1596 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  Template Name   : BunBun Vercel Static CSR Frontend (index.html)
+  Version         : v1.0.0
+  Backend API     : https://bunbunserver.my.id (Refer to API_ENDPOINT_DOCS.md)
+  Target Platform : Vercel Static Hosting + Vercel Serverless Functions (/api/sitemap.js)
+  Routes & Pages  : 1. Homepage           (/ or /?page=home)
+                       -> Priority #1 Fetch: GET /api/articles/random?limit=24
+                       -> <head>: Canonical (/), Title, Meta Robots, Meta SEO, WebSite + ItemList JSON-LD
+                    2. Category Page      (/?category=<category>)
+                       -> Priority #1 Fetch: GET /api/category/<category>?limit=24
+                       -> <head>: Canonical (/?category=<category>), Title, 2 Meta Only (meta robots + meta seo), Zero JSON-LD
+                    3. Single Article     (/?category=<category>&slug=<slug>)
+                       -> Priority #1 Fetch: GET /api/article?category=<category>&slug=<slug> (Sentences & Images first)
+                       -> <head>: Canonical (/?category=<category>&slug=<slug>), Title, Meta Robots, Meta SEO,
+                                  Article JSON-LD, BreadcrumbList JSON-LD
+                       -> No categories listing in header navigation on Single Article page
+                       -> Priority #2 Deferred (priority: 'low' after article text & images mount):
+                          a) Related Posts: GET /api/articles/random?limit=10
+                          b) Related Links: GET /api/articles/random?limit=5 + GET /api/domains/status
+                    4. XML Sitemap        (/sitemap.xml -> Vercel Serverless Function /api/sitemap.js)
+                       -> Reads https://bunbunserver.my.id/sitemap.xml, rewrites all <loc> URLs to the
+                          receiving Vercel subdomain address, and returns application/xml.
+  ============================================================================
+-->
+<html lang="en" dir="ltr" data-api-endpoint="https://bunbunserver.my.id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- ===================================================================== -->
+  <!-- 1. DNS PRECONNECT & PREFETCH (API Endpoint, Fonts URL, Image CDNs)    -->
+  <!-- ===================================================================== -->
+  <link rel="preconnect" href="https://bunbunserver.my.id" crossorigin="anonymous" />
+  <link rel="dns-prefetch" href="https://bunbunserver.my.id" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" />
+  <link rel="dns-prefetch" href="https://blogger.googleusercontent.com" />
+  <link rel="dns-prefetch" href="https://lh3.googleusercontent.com" />
+  <link rel="dns-prefetch" href="https://i0.wp.com" />
+
+  <!-- ===================================================================== -->
+  <!-- 2. PUBSUBHUBBUB HUB, SITEMAP XML & ATOM FEED LINKS                    -->
+  <!-- ===================================================================== -->
+  <link rel="hub" href="https://pubsubhubbub.appspot.com" />
+  <link id="sitemap-xml-link" rel="sitemap" type="application/xml" title="Sitemap" href="https://bunbunserver.my.id/sitemap.xml" />
+  <link id="atom-feed-link" rel="alternate" type="application/atom+xml" title="Technical Knowledgebase - Atom" href="https://bunbunserver.my.id/atom.xml" />
+
+  <!-- ===================================================================== -->
+  <!-- 3. INITIAL TITLE, CANONICAL URL & 2 CORE SEO META TAGS                -->
+  <!--    (1. meta robots, 2. meta seo)                                      -->
+  <!-- ===================================================================== -->
+  <title>Technical Knowledgebase</title>
+  <link id="canonical-url" rel="canonical" href="https://bunbunserver.my.id/" />
+  <meta id="meta-robots" name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <meta id="meta-seo" name="description" content="Verified technical guides, diagnostic procedures, and engineering diagrams." />
+
+  <!-- ===================================================================== -->
+  <!-- 4. SYNCHRONOUS CANONICAL URL INIT + PRIORITY #1 API FETCH IN <HEAD>   -->
+  <!--    Detects the active Vercel subdomain/domain origin at millisecond 0 -->
+  <!--    and initiates the Priority #1 API fetch before <body> parses.      -->
+  <!-- ===================================================================== -->
+  <script>
+  (function() {
+    var htmlEl = document.documentElement;
+    var API_ENDPOINT = (htmlEl.getAttribute('data-api-endpoint') || 'https://bunbunserver.my.id').trim().replace(/\/+$/, '');
+
+    var loc = window.location || {};
+    var hasValidHttpOrigin = Boolean(
+      loc.origin &&
+      loc.origin !== 'null' &&
+      /^https?:\/\//i.test(loc.origin)
+    );
+
+    // Active Vercel subdomain / custom domain origin (e.g. https://autotech-hub.vercel.app)
+    var vercelOrigin = hasValidHttpOrigin
+      ? loc.origin.replace(/\/+$/, '')
+      : 'https://autotech-hub.vercel.app';
+
+    var hostname = String(loc.hostname || '').trim() || 'autotech-hub.vercel.app';
+    var siteTitle = (htmlEl.getAttribute('data-site-title') || '').trim() ||
+      ((hostname && hostname !== 'localhost' && hostname !== '127.0.0.1' && hasValidHttpOrigin)
+        ? hostname
+        : 'Technical Knowledgebase');
+
+    function resolveRouteFromLocation() {
+      var params = new URLSearchParams(loc.search || '');
+      var rawHash = String(loc.hash || '').replace(/^#\/?/, '');
+
+      if (rawHash.indexOf('?') !== -1) {
+        var hashParams = new URLSearchParams(rawHash.split('?')[1]);
+        hashParams.forEach(function(val, key) {
+          if (!params.get(key)) params.set(key, val);
+        });
+      }
+
+      var category = (params.get('category') || params.get('db') || '').trim();
+      var slug = (params.get('slug') || '').trim();
+      var page = (params.get('page') || params.get('view') || '').trim().toLowerCase();
+      var q = (params.get('q') || params.get('keyword') || '').trim();
+      var cleanHashName = rawHash.split('?')[0].replace(/^\/+|\/+$/g, '').toLowerCase();
+      var pathname = String(loc.pathname || '/').toLowerCase();
+
+      if (page === 'sitemap' || cleanHashName === 'sitemap' || pathname === '/sitemap.xml') {
+        return { pageMode: 'sitemap', category: category, slug: '', q: q };
+      }
+      if (category && slug) {
+        return { pageMode: 'article', category: category, slug: slug, q: '' };
+      }
+      if (category) {
+        return { pageMode: 'category', category: category, slug: '', q: q };
+      }
+      return { pageMode: 'home', category: '', slug: '', q: q };
+    }
+
+    function buildCanonicalForRoute(route) {
+      if (route.pageMode === 'article') {
+        return vercelOrigin + '/?category=' + encodeURIComponent(route.category) + '&slug=' + encodeURIComponent(route.slug);
+      }
+      if (route.pageMode === 'category') {
+        return vercelOrigin + '/?category=' + encodeURIComponent(route.category);
+      }
+      if (route.pageMode === 'sitemap') {
+        return vercelOrigin + '/sitemap.xml';
+      }
+      return vercelOrigin + '/';
+    }
+
+    function buildPrimaryApiUrl(route) {
+      if (route.pageMode === 'article') {
+        return API_ENDPOINT + '/api/article?category=' + encodeURIComponent(route.category) + '&slug=' + encodeURIComponent(route.slug);
+      }
+      if (route.pageMode === 'category') {
+        var catParams = new URLSearchParams({ limit: '24' });
+        if (route.q) catParams.set('q', route.q);
+        return API_ENDPOINT + '/api/category/' + encodeURIComponent(route.category) + '?' + catParams.toString();
+      }
+      if (route.pageMode === 'sitemap') {
+        return API_ENDPOINT + '/sitemap.xml?domain=all&db=all&limit=500';
+      }
+      var homeParams = new URLSearchParams({ limit: '24' });
+      if (route.q) homeParams.set('q', route.q);
+      return API_ENDPOINT + '/api/articles/random?' + homeParams.toString();
+    }
+
+    var initialRoute = resolveRouteFromLocation();
+    var initialCanonical = buildCanonicalForRoute(initialRoute);
+    var initialApiUrl = buildPrimaryApiUrl(initialRoute);
+
+    // 1. Set Canonical URL, Sitemap XML Link & Atom Feed Link synchronously in <head>
+    var canonicalEl = document.getElementById('canonical-url');
+    if (canonicalEl) {
+      canonicalEl.setAttribute('href', initialCanonical);
+    }
+    var sitemapLinkEl = document.getElementById('sitemap-xml-link');
+    if (sitemapLinkEl) {
+      sitemapLinkEl.setAttribute('href', vercelOrigin + '/sitemap.xml');
+    }
+    var atomEl = document.getElementById('atom-feed-link');
+    if (atomEl) {
+      atomEl.setAttribute('href', API_ENDPOINT + '/atom.xml?domain=all&db=all');
+      atomEl.setAttribute('title', siteTitle + ' - Atom 1.0 Feed');
+    }
+
+    // 2. Set initial baseline <title> and #meta-seo synchronously based on route
+    var metaSeoEl = document.getElementById('meta-seo');
+    if (initialRoute.pageMode === 'article') {
+      var readableSlug = initialRoute.slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      document.title = readableSlug + ' - ' + siteTitle;
+      if (metaSeoEl) {
+        metaSeoEl.setAttribute('content', readableSlug + ' technical specification and reference diagrams on ' + siteTitle + '.');
+      }
+    } else if (initialRoute.pageMode === 'category') {
+      var readableCat = initialRoute.category.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      document.title = readableCat + ' - ' + siteTitle;
+      if (metaSeoEl) {
+        metaSeoEl.setAttribute('content', 'Browse random ' + readableCat + ' technical articles and diagrams on ' + siteTitle + '.');
+      }
+    } else if (initialRoute.pageMode === 'sitemap') {
+      document.title = 'XML Sitemap (' + siteTitle + ')';
+      if (metaSeoEl) {
+        metaSeoEl.setAttribute('content', 'Dynamic XML Sitemap rewritten to ' + vercelOrigin + ' via Vercel Serverless Function.');
+      }
+    } else {
+      document.title = siteTitle;
+      if (metaSeoEl) {
+        metaSeoEl.setAttribute('content', 'Explore technical guides and engineering diagrams from global databases on ' + siteTitle + '.');
+      }
+    }
+
+    // 3. Fire Priority #1 API Fetch in <head>
+    var dataPromise;
+    if (initialRoute.pageMode === 'sitemap') {
+      dataPromise = fetch(initialApiUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/xml, text/xml, */*' },
+        priority: 'high'
+      }).then(function(response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.text();
+      });
+    } else {
+      dataPromise = fetch(initialApiUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'high'
+      }).then(function(response) {
+        if (!response.ok) {
+          var error = new Error('HTTP ' + response.status);
+          error.status = response.status;
+          throw error;
+        }
+        return response.json();
+      });
+    }
+
+    window.__BUNBUN_VERCEL_CSR__ = {
+      templateName: 'BunBun Vercel Static CSR',
+      templateVersion: '1.0.0',
+      apiEndpoint: API_ENDPOINT,
+      vercelOrigin: vercelOrigin,
+      hostname: hostname,
+      hasValidHttpOrigin: hasValidHttpOrigin,
+      blogTitle: siteTitle,
+      blogDescription: 'Explore technical guides, specifications, and reference diagrams across all categories on ' + siteTitle + '.',
+      pageMode: initialRoute.pageMode,
+      category: initialRoute.category,
+      slug: initialRoute.slug,
+      q: initialRoute.q || '',
+      canonicalUrl: initialCanonical,
+      dataPromise: dataPromise,
+      resolveRouteFromLocation: resolveRouteFromLocation,
+      buildCanonicalForRoute: buildCanonicalForRoute,
+      buildPrimaryApiUrl: buildPrimaryApiUrl
+    };
+  })();
+  </script>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS CDN (Pinned Version 3.4.17) -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+
+  <style>
+    body {
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+  </style>
+</head>
+
+<body class="min-h-screen flex flex-col bg-slate-50 text-slate-900 antialiased">
+
+  <!-- ===================================================================== -->
+  <!-- PRIORITY #1 IN BODY: MAIN ARTICLE TEXT & IMAGE / LISTING CONTAINER    -->
+  <!-- Placed FIRST in DOM so Googlebot indexes Article Text & Images first  -->
+  <!-- ===================================================================== -->
+  <main id="app-main" role="main" class="order-2 flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+    <article id="app-priority-content" class="max-w-3xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-10">
+      <h1 id="app-initial-heading" class="text-xl sm:text-2xl font-bold text-slate-900">Technical Knowledgebase</h1>
+      <p class="mt-2 text-sm text-slate-500">Loading verified technical article text and engineering diagrams...</p>
+    </article>
+  </main>
+
+  <!-- ===================================================================== -->
+  <!-- HEADER NAVIGATION (Visually top via CSS `order-1`, after <main> DOM)  -->
+  <!-- ===================================================================== -->
+  <header id="app-header" class="order-1 bg-white border-b border-slate-200 sticky top-0 z-20">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 min-h-[4rem] py-2.5 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <a id="brand-home-link" href="#home" data-route="home" class="text-lg sm:text-xl font-extrabold text-slate-900 hover:text-blue-600 transition-colors truncate">
+          Technical Knowledgebase
+        </a>
+        <span id="vercel-host-badge" class="hidden md:inline-flex items-center px-2 py-0.5 rounded text-[11px] font-mono bg-slate-900 text-white" title="Active Vercel Subdomain / Origin">
+          ▲ vercel
+        </span>
+      </div>
+
+      <div class="flex items-center gap-2.5 flex-1 sm:flex-initial justify-end min-w-0">
+        <!-- Keyword Search Form -->
+        <form id="app-search-form" role="search" class="relative flex items-center">
+          <input
+            id="app-search-input"
+            type="search"
+            name="q"
+            placeholder="Search specs, sensors..."
+            aria-label="Search technical articles"
+            class="w-36 sm:w-48 px-3 py-1.5 pr-7 rounded-lg border border-slate-200 bg-slate-50 text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white transition-colors"
+          />
+          <button
+            id="app-search-submit"
+            type="submit"
+            aria-label="Submit search"
+            class="absolute right-2 text-slate-400 hover:text-blue-600 text-xs font-semibold"
+          >
+            &#8981;
+          </button>
+        </form>
+
+        <nav id="app-category-nav" aria-label="Primary Navigation" class="flex items-center gap-1.5 overflow-x-auto text-xs sm:text-sm font-medium max-w-full">
+          <a id="nav-home-link" href="#home" data-route="home" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold whitespace-nowrap">Home</a>
+          <a id="nav-sitemap-link" href="#sitemap" data-route="sitemap" class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors whitespace-nowrap font-mono">sitemap.xml</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================================================================== -->
+  <!-- FOOTER (Visually bottom via CSS `order-3`)                            -->
+  <!-- ===================================================================== -->
+  <footer id="app-footer" class="order-3 bg-white border-t border-slate-200 mt-12">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+      <div class="flex flex-wrap items-center gap-2">
+        <a id="footer-home-link" href="#home" data-route="home" class="font-semibold text-slate-700 hover:text-blue-600">Technical Knowledgebase</a>
+        <span>&#8212; Vercel CSR Static HTML + Serverless XML Sitemap</span>
+      </div>
+      <div class="flex flex-wrap items-center gap-4">
+        <a id="footer-sitemap-link" href="#sitemap" data-route="sitemap" class="font-mono font-medium text-blue-600 hover:underline transition-colors">/sitemap.xml (application/xml)</a>
+        <a id="footer-atom-link" href="https://bunbunserver.my.id/atom.xml?domain=all&amp;db=all" target="_blank" rel="noopener" class="font-mono text-slate-500 hover:text-blue-600 transition-colors">atom.xml</a>
+        <span id="footer-origin-label" class="font-mono text-slate-400">https://autotech-hub.vercel.app</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ===================================================================== -->
+  <!-- 5. CLIENT-SIDE RENDERING ENGINE (API_ENDPOINT_DOCS.md COMPLIANT)      -->
+  <!-- ===================================================================== -->
+  <script>
+  (function() {
+    'use strict';
+
+    var TW = {
+      // Single Article Page (Priority #1 Content)
+      articleContainer: 'max-w-3xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-10',
+      breadcrumb: 'flex flex-wrap items-center gap-2 text-xs text-slate-500 mb-4',
+      breadcrumbLink: 'hover:text-blue-600 underline-offset-2 hover:underline cursor-pointer',
+      categoryBadge: 'inline-block px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-blue-50 text-blue-700 mb-3 hover:bg-blue-100 transition-colors cursor-pointer',
+      articleTitle: 'text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-900 tracking-tight leading-tight',
+      heroFigure: 'my-6 rounded-xl overflow-hidden border border-slate-200 bg-slate-50',
+      heroImg: 'w-full max-h-[500px] object-contain mx-auto block',
+      figureCaption: 'px-4 py-2.5 text-xs text-slate-600 bg-slate-100/80 border-t border-slate-200',
+      sentencesWrapper: 'mt-6 space-y-4 text-base sm:text-lg text-slate-800 leading-relaxed',
+      sentenceParagraph: 'text-slate-800 leading-relaxed',
+      inlineFigure: 'my-6 rounded-xl overflow-hidden border border-slate-200 bg-white',
+      inlineImg: 'w-full max-h-[440px] object-contain mx-auto block',
+
+      // Single Article Page — Related Posts Component (Non-Priority, Limit = 10)
+      relatedSection: 'max-w-3xl mx-auto mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8',
+      relatedHeader: 'text-lg sm:text-xl font-bold text-slate-900 pb-3 mb-4 border-b border-slate-200',
+      relatedList: 'grid grid-cols-1 sm:grid-cols-2 gap-4',
+      relatedCard: 'group flex items-start gap-3.5 p-3 rounded-xl border border-slate-200 hover:border-blue-300 hover:bg-slate-50/70 transition-colors cursor-pointer',
+      relatedThumbWrap: 'w-20 h-16 rounded-lg bg-slate-100 overflow-hidden shrink-0 border border-slate-200',
+      relatedThumb: 'w-full h-full object-cover',
+      relatedBody: 'min-w-0 flex-1',
+      relatedCat: 'block text-[11px] font-semibold uppercase tracking-wider text-blue-600',
+      relatedTitle: 'mt-0.5 text-sm font-bold text-slate-900 group-hover:text-blue-600 line-clamp-2 leading-snug',
+
+      // Single Article Page — Related Links Component (Non-Priority, All Categories & All HTTP-200 Domains)
+      relatedLinksSection: 'max-w-3xl mx-auto mt-6 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8',
+      relatedLinksHeader: 'text-lg sm:text-xl font-bold text-slate-900 pb-3 mb-4 border-b border-slate-200',
+      relatedLinksList: 'divide-y divide-slate-100',
+      relatedLinksItem: 'py-2.5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5',
+      relatedLinksAnchor: 'text-sm font-semibold text-slate-800 hover:text-blue-600 transition-colors line-clamp-1',
+      relatedLinksMetaWrap: 'flex items-center gap-2 shrink-0',
+      relatedLinksCatBadge: 'px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600',
+      relatedLinksDomainBadge: 'px-2 py-0.5 rounded text-[11px] font-mono text-blue-700 bg-blue-50 border border-blue-100',
+
+      // Homepage & Category Listing Pages
+      sectionHeader: 'mb-6 pb-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-end justify-between gap-3',
+      sectionTitle: 'text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight',
+      sectionDesc: 'mt-1 text-sm text-slate-600',
+      postsGrid: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6',
+      postCard: 'bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col',
+      cardImgLink: 'block aspect-[16/10] bg-slate-100 overflow-hidden border-b border-slate-100 cursor-pointer',
+      cardImg: 'w-full h-full object-cover',
+      cardBody: 'p-5 flex-1 flex flex-col justify-between',
+      cardCatLink: 'text-xs font-semibold uppercase tracking-wider text-blue-600 hover:underline cursor-pointer',
+      cardTitle: 'mt-1.5 text-base sm:text-lg font-bold text-slate-900 hover:text-blue-600 line-clamp-2 cursor-pointer',
+      cardExcerpt: 'mt-2 text-xs sm:text-sm text-slate-600 line-clamp-3',
+      cardReadMore: 'mt-4 pt-3 border-t border-slate-100 text-xs font-semibold text-blue-600 hover:text-blue-800 inline-flex items-center gap-1 cursor-pointer',
+
+      // Header Category Navigation Links
+      navLink: 'px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-600 transition-colors whitespace-nowrap cursor-pointer',
+      navLinkActive: 'px-3 py-1.5 rounded-lg bg-blue-600 text-white font-semibold whitespace-nowrap cursor-pointer'
+    };
+
+    var FALLBACK_CATEGORIES = [
+      { category: 'break-system', label: 'Break System', count: 1250, loadedAt: 1761360000000, updatedAt: 1761350000 },
+      { category: 'engine-diagnostics', label: 'Engine Diagnostics', count: 980, loadedAt: 1761360000050, updatedAt: 1761350000 },
+      { category: 'transmission-control', label: 'Transmission Control', count: 740, loadedAt: 1761360000100, updatedAt: 1761350000 },
+      { category: 'electrical-wiring', label: 'Electrical Wiring', count: 1120, loadedAt: 1761360000150, updatedAt: 1761350000 }
+    ];
+
+    function buildDiagramDataUri(label, accentColor) {
+      var svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500">' +
+        '<rect width="800" height="500" fill="#f8fafc"/>' +
+        '<rect x="28" y="28" width="744" height="444" rx="16" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>' +
+        '<line x1="28" y1="92" x2="772" y2="92" stroke="#e2e8f0" stroke-width="2"/>' +
+        '<circle cx="64" cy="60" r="10" fill="' + accentColor + '"/>' +
+        '<text x="88" y="66" font-family="Inter, sans-serif" font-size="18" font-weight="700" fill="#0f172a">' + label + '</text>' +
+        '<rect x="68" y="132" width="200" height="110" rx="10" fill="#eff6ff" stroke="' + accentColor + '" stroke-width="2"/>' +
+        '<text x="168" y="182" text-anchor="middle" font-family="monospace" font-size="14" font-weight="700" fill="#1e3a8a">ECU / MODULE</text>' +
+        '<text x="168" y="206" text-anchor="middle" font-family="monospace" font-size="12" fill="#475569">5V / 12V REF</text>' +
+        '<line x1="268" y1="168" x2="510" y2="168" stroke="' + accentColor + '" stroke-width="3" stroke-dasharray="8 4"/>' +
+        '<line x1="268" y1="208" x2="510" y2="208" stroke="#64748b" stroke-width="3"/>' +
+        '<rect x="510" y="132" width="220" height="110" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/>' +
+        '<text x="620" y="182" text-anchor="middle" font-family="monospace" font-size="14" font-weight="700" fill="#0f172a">SENSOR / ACTUATOR</text>' +
+        '<text x="620" y="206" text-anchor="middle" font-family="monospace" font-size="12" fill="#334155">800 - 1,400 OHMS</text>' +
+        '<rect x="68" y="284" width="662" height="140" rx="10" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/>' +
+        '<polyline fill="none" stroke="' + accentColor + '" stroke-width="3" points="95,380 145,320 195,380 245,320 295,380 345,320 395,380 445,320 495,380 545,320 595,380 645,320 695,380"/>' +
+        '<text x="95" y="310" font-family="monospace" font-size="12" fill="#64748b">DIAGNOSTIC WAVEFORM &amp; PINOUT REFERENCE</text>' +
+        '</svg>';
+      return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    }
+
+    var FALLBACK_ARTICLES = [
+      {
+        id: 42,
+        category: 'break-system',
+        categoryLabel: 'Break System',
+        keyword: 'abs wheel speed sensor resistance specification',
+        slug: 'abs-wheel-speed-sensor-resistance-specification',
+        title: 'ABS Wheel Speed Sensor Resistance Specification',
+        excerpt: 'Passive inductive ABS wheel speed sensors typically measure between 800 and 1,400 ohms at room temperature. Active Hall-effect sensors require a stabilized reference supply...',
+        thumbnail: buildDiagramDataUri('ABS Wheel Speed Sensor Pinout & Reluctor Ring', '#2563eb'),
+        image: buildDiagramDataUri('ABS Wheel Speed Sensor Pinout & Reluctor Ring', '#2563eb'),
+        imageAlt: 'ABS Sensor Wiring & Reluctor Ring Diagram',
+        imageCount: 2,
+        sentenceCount: 9,
+        createdAt: 1761350000,
+        updatedAt: 1761350000,
+        sentences: [
+          'Passive inductive ABS wheel speed sensors typically measure between 800 and 1,400 ohms at room temperature.',
+          'Active Hall-effect sensors require a stabilized 12-volt or 5-volt reference supply from the ABS control module.',
+          'Inspect the tone ring teeth for metallic debris or cracked reluctor segments if erratic signal dropouts occur.',
+          'Disconnect the two-pin harness connector and probe across the sensor terminals using a calibrated digital multimeter set to the 2k-ohm range.',
+          'An infinite resistance reading (OL) confirms an open winding inside the sensor coil or a severed pigtail lead near the steering knuckle.',
+          'Spin the wheel hub by hand at one revolution per second while monitoring AC millivolt output; a healthy passive sensor generates at least 250 mV AC.',
+          'Verify that the air gap between the sensor pole piece and the toothed reluctor ring remains within 0.3 mm to 1.1 mm across the full 360-degree rotation.',
+          'Check both harness wires for short-to-ground or short-to-voltage conditions before condemning the Electronic Brake Control Module (EBCM).',
+          'After installing a replacement wheel speed sensor, torque the mounting bolt to 8 Nm and clear stored C0035 or C0040 diagnostic trouble codes.'
+        ],
+        images: [
+          {
+            keyword: 'abs wheel speed sensor resistance specification',
+            slug: 'abs-wheel-speed-sensor-resistance-specification',
+            title: 'ABS Sensor Wiring & Reluctor Ring Diagram',
+            alt: 'ABS Sensor Wiring & Reluctor Ring Diagram',
+            url: buildDiagramDataUri('ABS Sensor Wiring & Reluctor Ring Diagram', '#2563eb'),
+            thumb: buildDiagramDataUri('ABS Sensor Wiring & Reluctor Ring Diagram', '#2563eb'),
+            filetype: 'svg',
+            source: 'https://bunbunserver.my.id',
+            domain: 'bunbunserver.my.id',
+            width: 800,
+            height: 500
+          },
+          {
+            keyword: 'abs wheel speed sensor waveform test',
+            slug: 'abs-wheel-speed-sensor-resistance-specification',
+            title: 'Inductive vs Hall-Effect Square Wave Oscilloscope Trace',
+            alt: 'Inductive vs Hall-Effect Square Wave Oscilloscope Trace',
+            url: buildDiagramDataUri('Oscilloscope Signal Waveform (mV AC vs Digital Square Wave)', '#0284c7'),
+            thumb: buildDiagramDataUri('Oscilloscope Signal Waveform (mV AC vs Digital Square Wave)', '#0284c7'),
+            filetype: 'svg',
+            source: 'https://bunbunserver.my.id',
+            domain: 'bunbunserver.my.id',
+            width: 700,
+            height: 440
+          }
+        ]
+      },
+      {
+        id: 108,
+        category: 'engine-diagnostics',
+        categoryLabel: 'Engine Diagnostics',
+        keyword: 'mass airflow sensor hot wire voltage test',
+        slug: 'mass-airflow-sensor-hot-wire-voltage-test',
+        title: 'Mass Airflow Sensor Hot Wire Voltage & Frequency Test',
+        excerpt: 'Hot-wire Mass Airflow (MAF) sensors output either an analog voltage between 0.7V at idle and 4.5V at wide-open throttle or a digital frequency signal...',
+        thumbnail: buildDiagramDataUri('Hot-Wire MAF Sensor 5-Pin Circuit Schematic', '#059669'),
+        image: buildDiagramDataUri('Hot-Wire MAF Sensor 5-Pin Circuit Schematic', '#059669'),
+        imageAlt: 'Hot-Wire MAF Sensor 5-Pin Circuit Schematic',
+        imageCount: 1,
+        sentenceCount: 6,
+        createdAt: 1761346000,
+        updatedAt: 1761350000,
+        sentences: [
+          'Hot-wire Mass Airflow (MAF) sensors output either an analog voltage between 0.7V at warm idle and 4.5V at wide-open throttle or a digital frequency signal.',
+          'Contamination on the platinum sensing element skews fuel trim calculations, causing lean under-load P0171 codes and rich idle conditions.',
+          'Backprobe the MAF signal return wire with the ignition ON and engine idling at 750 RPM to verify baseline grams-per-second airflow.',
+          'Confirm a clean 12.0V to 14.2V battery feed on the heater relay pin and less than 50 mV of ground drop on the sensor chassis ground.',
+          'Never touch the thermistor or hot-wire bridge with metal probes; clean only with residue-free dedicated MAF sensor aerosol solvent.',
+          'Reset long-term fuel trim adaptation tables with a bidirectional scan tool after servicing the intake boot or replacing the MAF cartridge.'
+        ],
+        images: [
+          {
+            keyword: 'mass airflow sensor hot wire voltage test',
+            slug: 'mass-airflow-sensor-hot-wire-voltage-test',
+            title: 'Hot-Wire MAF Sensor 5-Pin Circuit Schematic',
+            alt: 'Hot-Wire MAF Sensor 5-Pin Circuit Schematic',
+            url: buildDiagramDataUri('Hot-Wire MAF Sensor 5-Pin Circuit Schematic', '#059669'),
+            thumb: buildDiagramDataUri('Hot-Wire MAF Sensor 5-Pin Circuit Schematic', '#059669'),
+            filetype: 'svg',
+            source: 'https://bunbunserver.my.id',
+            domain: 'bunbunserver.my.id',
+            width: 800,
+            height: 500
+          }
+        ]
+      },
+      {
+        id: 215,
+        category: 'transmission-control',
+        categoryLabel: 'Transmission Control',
+        keyword: 'torque converter clutch solenoid pwm duty cycle',
+        slug: 'torque-converter-clutch-solenoid-pwm-duty-cycle',
+        title: 'Torque Converter Clutch Solenoid PWM Duty Cycle Diagnostics',
+        excerpt: 'Pulse-width modulated (PWM) torque converter clutch solenoids typically measure 10 to 16 ohms across the coil winding at 20 degrees Celsius...',
+        thumbnail: buildDiagramDataUri('TCC PWM Solenoid Hydraulic & Electrical Circuit', '#7c3aed'),
+        image: buildDiagramDataUri('TCC PWM Solenoid Hydraulic & Electrical Circuit', '#7c3aed'),
+        imageAlt: 'TCC PWM Solenoid Hydraulic & Electrical Circuit',
+        imageCount: 1,
+        sentenceCount: 6,
+        createdAt: 1761342000,
+        updatedAt: 1761350000,
+        sentences: [
+          'Pulse-width modulated (PWM) torque converter clutch solenoids typically measure 10 to 16 ohms across the coil winding at 20 degrees Celsius.',
+          'The Transmission Control Module (TCM) commands TCC duty cycle from 0% unlocked up to 98% full lockup in fourth, fifth, and sixth gears.',
+          'Monitor turbine speed sensor RPM versus engine crankshaft RPM; slip exceeding 60 RPM under steady cruise triggers DTC P0741.',
+          'High transmission fluid temperatures can increase solenoid coil resistance above 22 ohms, reducing clamping pressure at the converter damper.',
+          'Command the TCC solenoid to 50% duty cycle with a scan tool while measuring current draw using a low-amp inductive clamp.',
+          'Inspect the valve body separator plate and TCC regulator valve bore for scoring whenever lockup shudder persists after solenoid replacement.'
+        ],
+        images: [
+          {
+            keyword: 'torque converter clutch solenoid pwm duty cycle',
+            slug: 'torque-converter-clutch-solenoid-pwm-duty-cycle',
+            title: 'TCC PWM Solenoid Hydraulic & Electrical Circuit',
+            alt: 'TCC PWM Solenoid Hydraulic & Electrical Circuit',
+            url: buildDiagramDataUri('TCC PWM Solenoid Hydraulic & Electrical Circuit', '#7c3aed'),
+            thumb: buildDiagramDataUri('TCC PWM Solenoid Hydraulic & Electrical Circuit', '#7c3aed'),
+            filetype: 'svg',
+            source: 'https://bunbunserver.my.id',
+            domain: 'bunbunserver.my.id',
+            width: 800,
+            height: 500
+          }
+        ]
+      },
+      {
+        id: 309,
+        category: 'electrical-wiring',
+        categoryLabel: 'Electrical Wiring',
+        keyword: 'can bus termination resistor 60 ohm diagnostic procedure',
+        slug: 'can-bus-termination-resistor-60-ohm-diagnostic-procedure',
+        title: 'CAN Bus Termination Resistor 60-Ohm Diagnostic Procedure',
+        excerpt: 'High-speed ISO 11898 CAN bus networks utilize two 120-ohm termination resistors wired in parallel between CAN High (Pin 6) and CAN Low (Pin 14)...',
+        thumbnail: buildDiagramDataUri('ISO 11898 High-Speed CAN Bus 60-Ohm Topology', '#d97706'),
+        image: buildDiagramDataUri('ISO 11898 High-Speed CAN Bus 60-Ohm Topology', '#d97706'),
+        imageAlt: 'ISO 11898 High-Speed CAN Bus 60-Ohm Topology',
+        imageCount: 1,
+        sentenceCount: 6,
+        createdAt: 1761338000,
+        updatedAt: 1761350000,
+        sentences: [
+          'High-speed ISO 11898 CAN bus networks utilize two 120-ohm termination resistors wired in parallel between CAN High (Pin 6) and CAN Low (Pin 14).',
+          'Disconnect the negative battery cable and wait five minutes for all gateway modules to power down before measuring bus resistance at the DLC.',
+          'A healthy terminated network reads approximately 60 ohms across DLC pins 6 and 14; a 120-ohm reading indicates an open trunk line or missing terminator.',
+          'With the ignition ON, CAN High idles at 2.5V and switches up to 3.5V, while CAN Low idles at 2.5V and switches down to 1.5V.',
+          'Mirror-image differential waveforms on a dual-trace oscilloscope confirm signal integrity and absence of twisted-pair capacitance faults.',
+          'Isolate shorted satellite modules one branch at a time at the star splice pack when U0100 or bus-off communication faults are active.'
+        ],
+        images: [
+          {
+            keyword: 'can bus termination resistor 60 ohm diagnostic procedure',
+            slug: 'can-bus-termination-resistor-60-ohm-diagnostic-procedure',
+            title: 'ISO 11898 High-Speed CAN Bus 60-Ohm Topology',
+            alt: 'ISO 11898 High-Speed CAN Bus 60-Ohm Topology',
+            url: buildDiagramDataUri('ISO 11898 High-Speed CAN Bus 60-Ohm Topology', '#d97706'),
+            thumb: buildDiagramDataUri('ISO 11898 High-Speed CAN Bus 60-Ohm Topology', '#d97706'),
+            filetype: 'svg',
+            source: 'https://bunbunserver.my.id',
+            domain: 'bunbunserver.my.id',
+            width: 800,
+            height: 500
+          }
+        ]
+      },
+      {
+        id: 412,
+        category: 'break-system',
+        categoryLabel: 'Break System',
+        keyword: 'electronic parking brake actuator calibration current draw',
+        slug: 'electronic-parking-brake-actuator-calibration-current-draw',
+        title: 'Electronic Parking Brake (EPB) Caliper Motor Current & Calibration',
+        excerpt: 'Rear electronic parking brake (EPB) caliper motors draw between 8A and 14A during full clamping engagement and require scan-tool service mode retraction...',
+        thumbnail: buildDiagramDataUri('EPB Rear Caliper Actuator & Hall Position Circuit', '#2563eb'),
+        image: buildDiagramDataUri('EPB Rear Caliper Actuator & Hall Position Circuit', '#2563eb'),
+        imageAlt: 'EPB Rear Caliper Actuator & Hall Position Circuit',
+        imageCount: 1,
+        sentenceCount: 6,
+        createdAt: 1761334000,
+        updatedAt: 1761350000,
+        sentences: [
+          'Rear electronic parking brake (EPB) caliper motors draw between 8A and 14A during full clamping engagement and require scan-tool service mode retraction.',
+          'Never force the caliper piston backward mechanically without commanding EPB lining replacement mode, or the internal ball-screw drive gear will shear.',
+          'Measure actuator coil resistance directly at the two-pin caliper connector; normal motor winding resistance ranges from 0.6 to 1.8 ohms.',
+          'Inspect the rear sub-harness near the trailing arm pivot for chafed insulation and water intrusion if C1011 open-circuit faults recur.',
+          'After installing new rear friction pads, execute the basic setting air-gap calibration routine so the EPB module learns the clamp travel point.',
+          'Verify equal left and right clamping current profiles on the scan tool data stream to prevent uneven rear pad wear.'
+        ],
+        images: [
+          {
+            keyword: 'electronic parking brake actuator calibration current draw',
+            slug: 'electronic-parking-brake-actuator-calibration-current-draw',
+            title: 'EPB Rear Caliper Actuator & Hall Position Circuit',
+            alt: 'EPB Rear Caliper Actuator & Hall Position Circuit',
+            url: buildDiagramDataUri('EPB Rear Caliper Actuator & Hall Position Circuit', '#2563eb'),
+            thumb: buildDiagramDataUri('EPB Rear Caliper Actuator & Hall Position Circuit', '#2563eb'),
+            filetype: 'svg',
+            source: 'https://bunbunserver.my.id',
+            domain: 'bunbunserver.my.id',
+            width: 800,
+            height: 500
+          }
+        ]
+      },
+      {
+        id: 519,
+        category: 'engine-diagnostics',
+        categoryLabel: 'Engine Diagnostics',
+        keyword: 'camshaft phaser oil control valve solenoid resistance',
+        slug: 'camshaft-phaser-oil-control-valve-solenoid-resistance',
+        title: 'VVT Camshaft Phaser Oil Control Valve Solenoid Resistance & Timing',
+        excerpt: 'Variable Valve Timing (VVT) oil control valve solenoids measure 6.9 to 7.9 ohms at 20 degrees Celsius and regulate hydraulic oil routing to the cam phaser...',
+        thumbnail: buildDiagramDataUri('VVT Oil Control Valve Spool & Cam Phaser Diagram', '#059669'),
+        image: buildDiagramDataUri('VVT Oil Control Valve Spool & Cam Phaser Diagram', '#059669'),
+        imageAlt: 'VVT Oil Control Valve Spool & Cam Phaser Diagram',
+        imageCount: 1,
+        sentenceCount: 6,
+        createdAt: 1761330000,
+        updatedAt: 1761350000,
+        sentences: [
+          'Variable Valve Timing (VVT) oil control valve solenoids measure 6.9 to 7.9 ohms at 20 degrees Celsius and regulate hydraulic routing to the cam phaser.',
+          'Sludge accumulation on the oil control valve mesh filter restricts spool travel, triggering P0011 intake camshaft over-advanced timing codes.',
+          'Verify that hot engine oil pressure at 2,000 RPM exceeds 25 PSI before replacing a suspect camshaft phaser or timing chain tensioner.',
+          'Compare desired camshaft phase angle against actual camshaft angle on the scan tool during a 1,500 to 3,000 RPM road-load sweep.',
+          'Bench-test the removed OCV spool valve with regulated 12V pulses to confirm crisp plunger return without binding.',
+          'Always replace the O-ring seal and torque the oil control valve hold-down fastener to 9 Nm upon reassembly.'
+        ],
+        images: [
+          {
+            keyword: 'camshaft phaser oil control valve solenoid resistance',
+            slug: 'camshaft-phaser-oil-control-valve-solenoid-resistance',
+            title: 'VVT Oil Control Valve Spool & Cam Phaser Diagram',
+            alt: 'VVT Oil Control Valve Spool & Cam Phaser Diagram',
+            url: buildDiagramDataUri('VVT Oil Control Valve Spool & Cam Phaser Diagram', '#059669'),
+            thumb: buildDiagramDataUri('VVT Oil Control Valve Spool & Cam Phaser Diagram', '#059669'),
+            filetype: 'svg',
+            source: 'https://bunbunserver.my.id',
+            domain: 'bunbunserver.my.id',
+            width: 800,
+            height: 500
+          }
+        ]
+      }
+    ];
+
+    function buildSampleBackendSitemapXml() {
+      var lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+      ];
+      for (var i = 0; i < FALLBACK_ARTICLES.length; i++) {
+        var item = FALLBACK_ARTICLES[i];
+        lines.push('  <url>');
+        lines.push('    <loc>https://bunbunserver.my.id/?category=' + encodeURIComponent(item.category) + '&amp;slug=' + encodeURIComponent(item.slug) + '</loc>');
+        lines.push('  </url>');
+      }
+      lines.push('</urlset>');
+      return lines.join('\n');
+    }
+
+    function buildFallbackPayloadForRoute(route) {
+      if (route.pageMode === 'sitemap') {
+        return buildSampleBackendSitemapXml();
+      }
+      var qLower = String(route.q || '').toLowerCase();
+      var filterByQuery = function(item) {
+        if (!qLower) return true;
+        return (
+          item.title.toLowerCase().indexOf(qLower) !== -1 ||
+          item.keyword.toLowerCase().indexOf(qLower) !== -1 ||
+          item.category.toLowerCase().indexOf(qLower) !== -1 ||
+          item.excerpt.toLowerCase().indexOf(qLower) !== -1
+        );
+      };
+
+      if (route.pageMode === 'article') {
+        var found = null;
+        for (var i = 0; i < FALLBACK_ARTICLES.length; i++) {
+          if (FALLBACK_ARTICLES[i].slug === route.slug) {
+            found = FALLBACK_ARTICLES[i];
+            break;
+          }
+        }
+        if (!found) {
+          var customTitle = (route.slug || 'technical-specification').replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+          var customCat = route.category || 'break-system';
+          var customCatLabel = customCat.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+          found = {
+            id: 999,
+            category: customCat,
+            categoryLabel: customCatLabel,
+            keyword: customTitle.toLowerCase(),
+            slug: route.slug || 'technical-specification',
+            title: customTitle,
+            sentences: FALLBACK_ARTICLES[0].sentences,
+            images: FALLBACK_ARTICLES[0].images,
+            imageCount: 2,
+            sentenceCount: 9,
+            metaDesc: FALLBACK_ARTICLES[0].excerpt,
+            metaKeywords: customCat + ', specification, diagram, diagnostic',
+            createdAt: 1761350000,
+            updatedAt: 1761350000,
+            status: 1,
+            rewriteCount: 0
+          };
+        }
+        return Object.assign({}, found, { metaDesc: found.metaDesc || found.excerpt });
+      }
+
+      if (route.pageMode === 'category') {
+        var catArticles = FALLBACK_ARTICLES.filter(function(a) {
+          return (!route.category || a.category === route.category) && filterByQuery(a);
+        });
+        if (catArticles.length === 0) catArticles = FALLBACK_ARTICLES.filter(filterByQuery);
+        var catLabel = (route.category || 'break-system').replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+        return {
+          category: route.category || 'break-system',
+          categoryLabel: catLabel,
+          totalInCategory: catArticles.length,
+          articles: catArticles,
+          categories: FALLBACK_CATEGORIES
+        };
+      }
+
+      var matching = FALLBACK_ARTICLES.filter(filterByQuery);
+      return {
+        articles: matching,
+        count: matching.length,
+        query: route.q || '',
+        category: 'all',
+        categories: FALLBACK_CATEGORIES
+      };
+    }
+
+    var csr = window.__BUNBUN_VERCEL_CSR__ || {};
+    var mainEl = document.getElementById('app-main');
+    var navEl = document.getElementById('app-category-nav');
+    var brandLinkEl = document.getElementById('brand-home-link');
+    var vercelBadgeEl = document.getElementById('vercel-host-badge');
+    var searchFormEl = document.getElementById('app-search-form');
+    var searchInputEl = document.getElementById('app-search-input');
+    var footerHomeEl = document.getElementById('footer-home-link');
+    var footerSitemapEl = document.getElementById('footer-sitemap-link');
+    var footerOriginEl = document.getElementById('footer-origin-label');
+    var cachedCategories = [];
+
+    if (brandLinkEl) {
+      brandLinkEl.setAttribute('href', '/');
+      brandLinkEl.textContent = csr.blogTitle;
+    }
+    if (vercelBadgeEl) {
+      vercelBadgeEl.textContent = '▲ ' + csr.hostname;
+      vercelBadgeEl.setAttribute('title', 'Vercel Subdomain Origin: ' + csr.vercelOrigin);
+    }
+    if (searchInputEl && csr.q) {
+      searchInputEl.value = csr.q;
+    }
+    if (footerHomeEl) {
+      footerHomeEl.setAttribute('href', '/');
+      footerHomeEl.textContent = csr.blogTitle;
+    }
+    if (footerSitemapEl) {
+      footerSitemapEl.setAttribute('href', '/sitemap.xml');
+    }
+    if (footerOriginEl) {
+      footerOriginEl.textContent = csr.vercelOrigin;
+    }
+
+    function escapeHtml(str) {
+      return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function toIsoDate(ts) {
+      var n = Number(ts);
+      if (!Number.isFinite(n) || n <= 0) return new Date().toISOString();
+      var ms = n < 1e11 ? n * 1000 : n;
+      var d = new Date(ms);
+      return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+    }
+
+    function buildArticleCanonicalUrl(category, slug) {
+      return csr.vercelOrigin + '/?category=' + encodeURIComponent(category) + '&slug=' + encodeURIComponent(slug);
+    }
+
+    function buildCategoryCanonicalUrl(category) {
+      return csr.vercelOrigin + '/?category=' + encodeURIComponent(category);
+    }
+
+    function buildArticleHref(category, slug) {
+      return '/?category=' + encodeURIComponent(category) + '&slug=' + encodeURIComponent(slug);
+    }
+
+    function buildCategoryHref(category) {
+      return '/?category=' + encodeURIComponent(category);
+    }
+
+    function setHeadMeta(id, content) {
+      var el = document.getElementById(id);
+      if (el) el.setAttribute('content', String(content || ''));
+    }
+
+    function setCanonicalUrl(url) {
+      var el = document.getElementById('canonical-url');
+      if (el) el.setAttribute('href', String(url || csr.vercelOrigin + '/'));
+    }
+
+    function removeHeadElement(id) {
+      var el = document.getElementById(id);
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    }
+
+    function setJsonLd(id, dataObj) {
+      removeHeadElement(id);
+      if (!dataObj) return;
+      var s = document.createElement('script');
+      s.type = 'application/ld+json';
+      s.id = id;
+      s.textContent = JSON.stringify(dataObj);
+      document.head.appendChild(s);
+    }
+
+    function parseJsonArrayField(primaryArr, rawJsonField) {
+      if (Array.isArray(primaryArr)) return primaryArr;
+      if (Array.isArray(rawJsonField)) return rawJsonField;
+      if (typeof rawJsonField === 'string' && rawJsonField.trim()) {
+        try {
+          var parsed = JSON.parse(rawJsonField);
+          if (Array.isArray(parsed)) return parsed;
+        } catch (e) {}
+      }
+      return [];
+    }
+
+    /**
+     * Exact same origin-rewriting logic used in Vercel Serverless Function `/api/sitemap.js`:
+     * Reads the backend's XML sitemap response and rewrites the backend origin inside `<loc>`
+     * to match the Vercel subdomain address receiving the request.
+     */
+    function rewriteBackendSitemapXmlToVercelOrigin(rawXml, targetVercelOrigin) {
+      var cleanOrigin = String(targetVercelOrigin || csr.vercelOrigin).replace(/\/+$/, '');
+      return String(rawXml || '').replace(
+        /(<loc>\s*)https?:\/\/[^\/<\s]+/gi,
+        '$1' + cleanOrigin
+      );
+    }
+
+    function normalizeAllowedFrontendDomains(rawDomains) {
+      var defaultFallback = [
+        'https://autotech-hub.vercel.app',
+        'https://fixengineslok.blogspot.com',
+        'https://machinefixex.blogspot.com',
+        'https://sveltedemo.com'
+      ];
+      if (!Array.isArray(rawDomains) || rawDomains.length === 0) return defaultFallback;
+      var apiHost = '';
+      try {
+        apiHost = new URL(csr.apiEndpoint).hostname.toLowerCase();
+      } catch (e) {}
+
+      var seen = {};
+      var validOrigins = [];
+
+      for (var i = 0; i < rawDomains.length; i++) {
+        var raw = String(rawDomains[i] || '').trim().replace(/\/+$/, '');
+        if (!raw || raw.indexOf('*') !== -1) continue;
+        var candidate = (raw.indexOf('http://') === 0 || raw.indexOf('https://') === 0) ? raw : ('https://' + raw);
+        try {
+          var parsed = new URL(candidate);
+          var host = parsed.hostname.toLowerCase();
+          if (host === 'localhost' || host === '127.0.0.1' || host === apiHost) continue;
+          var origin = parsed.protocol + '//' + host;
+          if (!seen[origin]) {
+            seen[origin] = true;
+            validOrigins.push(origin);
+          }
+        } catch (e) {}
+      }
+      return validOrigins.length > 0 ? validOrigins : defaultFallback;
+    }
+
+    /**
+     * NON-PRIORITY COMPONENT #1 (SINGLE ARTICLE PAGE ONLY): RELATED POSTS (limit=10)
+     */
+    function fetchAndRenderRelatedPostsDeferred(currentSlug) {
+      var mountEl = document.getElementById('article-related-posts-mount');
+      if (!mountEl) return;
+
+      fetch(csr.apiEndpoint + '/api/articles/random?limit=10', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'low'
+      })
+        .then(function(res) { return res.ok ? res.json() : { articles: FALLBACK_ARTICLES }; })
+        .catch(function() { return { articles: FALLBACK_ARTICLES }; })
+        .then(function(data) {
+          if (!data) return;
+          var list = Array.isArray(data.articles) ? data.articles : [];
+          var filtered = list.filter(function(item) {
+            return item && item.slug && item.slug !== currentSlug;
+          }).slice(0, 10);
+          if (filtered.length === 0) return;
+
+          var itemsHtml = filtered.map(function(item) {
+            var url = buildArticleHref(item.category, item.slug);
+            var thumb = item.thumbnail || item.image || '';
+            var thumbHtml = thumb
+              ? '<div class="' + TW.relatedThumbWrap + '">' +
+                  '<img alt="' + escapeHtml(item.imageAlt || item.title) + '" class="' + TW.relatedThumb + '" decoding="async" height="64" loading="lazy" src="' + escapeHtml(thumb) + '" width="80"/>' +
+                '</div>'
+              : '';
+            return (
+              '<a class="' + TW.relatedCard + '" data-route="article" data-category="' + escapeHtml(item.category) + '" data-slug="' + escapeHtml(item.slug) + '" href="' + escapeHtml(url) + '">' +
+                thumbHtml +
+                '<div class="' + TW.relatedBody + '">' +
+                  '<span class="' + TW.relatedCat + '">' + escapeHtml(item.categoryLabel || item.category) + '</span>' +
+                  '<h3 class="' + TW.relatedTitle + '">' + escapeHtml(item.title) + '</h3>' +
+                '</div>' +
+              '</a>'
+            );
+          }).join('');
+
+          mountEl.innerHTML =
+            '<aside aria-label="Related Posts" class="' + TW.relatedSection + '" data-component="related-posts">' +
+              '<h2 class="' + TW.relatedHeader + '">Related Posts</h2>' +
+              '<div class="' + TW.relatedList + '">' + itemsHtml + '</div>' +
+            '</aside>';
+        });
+    }
+
+    /**
+     * NON-PRIORITY COMPONENT #2 (SINGLE ARTICLE PAGE ONLY): RELATED LINKS (limit=5)
+     */
+    function fetchAndRenderRelatedLinksDeferred(currentSlug) {
+      var mountEl = document.getElementById('article-related-links-mount');
+      if (!mountEl) return;
+
+      var lowPriorityOpts = {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'low'
+      };
+
+      Promise.all([
+        fetch(csr.apiEndpoint + '/api/articles/random?limit=5', lowPriorityOpts)
+          .then(function(r) { return r.ok ? r.json() : { articles: FALLBACK_ARTICLES }; })
+          .catch(function() { return { articles: FALLBACK_ARTICLES }; }),
+        fetch(csr.apiEndpoint + '/api/domains/status', lowPriorityOpts)
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .catch(function() { return null; })
+      ]).then(function(results) {
+        var articlesData = results[0];
+        var domainsData = results[1];
+        if (!articlesData || !Array.isArray(articlesData.articles)) return;
+
+        var rawDomains = (domainsData && Array.isArray(domainsData.activeHttp200Domains))
+          ? domainsData.activeHttp200Domains
+          : [];
+        var domainPool = normalizeAllowedFrontendDomains(rawDomains);
+
+        var list = articlesData.articles.filter(function(item) {
+          return item && item.slug && item.slug !== currentSlug;
+        }).slice(0, 5);
+        if (list.length === 0) return;
+
+        var linksHtml = list.map(function(item, idx) {
+          var targetOrigin = String(domainPool[idx % domainPool.length] || csr.vercelOrigin).replace(/\/+$/, '');
+          var crossDomainHref = targetOrigin + '/?category=' + encodeURIComponent(item.category) + '&slug=' + encodeURIComponent(item.slug);
+          var hostLabel = targetOrigin.replace(/^https?:\/\//, '');
+
+          return (
+            '<li class="' + TW.relatedLinksItem + '">' +
+              '<a class="' + TW.relatedLinksAnchor + '" href="' + escapeHtml(crossDomainHref) + '" target="_blank" rel="noopener">' +
+                escapeHtml(item.title) +
+              '</a>' +
+              '<div class="' + TW.relatedLinksMetaWrap + '">' +
+                '<span class="' + TW.relatedLinksCatBadge + '">' + escapeHtml(item.categoryLabel || item.category) + '</span>' +
+                '<span class="' + TW.relatedLinksDomainBadge + '">' + escapeHtml(hostLabel) + '</span>' +
+              '</div>' +
+            '</li>'
+          );
+        }).join('');
+
+        mountEl.innerHTML =
+          '<aside aria-label="Related Links Across All Categories and Domains" class="' + TW.relatedLinksSection + '" data-component="related-links">' +
+            '<h2 class="' + TW.relatedLinksHeader + '">Related Links</h2>' +
+            '<ul class="' + TW.relatedLinksList + '">' + linksHtml + '</ul>' +
+          '</aside>';
+      });
+    }
+
+    /**
+     * PAGE 1: SINGLE ARTICLE PAGE (`/?category=<category>&slug=<slug>`)
+     */
+    function renderSingleArticle(article) {
+      if (navEl) {
+        // Explicitly NO categories listing on Single Article page
+        navEl.innerHTML =
+          '<a class="' + TW.navLink + '" data-route="home" href="/">Home</a>' +
+          '<a class="' + TW.navLink + ' font-mono" data-route="sitemap" href="/sitemap.xml">sitemap.xml</a>';
+      }
+
+      var sentences = parseJsonArrayField(article.sentences, article.json_sentences);
+      var images = parseJsonArrayField(article.images, article.json_images);
+      var catSlug = article.category || csr.category;
+      var catLabel = article.categoryLabel || catSlug;
+      var articleSlug = article.slug || csr.slug;
+
+      var articleCanonicalUrl = buildArticleCanonicalUrl(catSlug, articleSlug);
+      var categoryCanonicalUrl = buildCategoryCanonicalUrl(catSlug);
+      var categoryHref = buildCategoryHref(catSlug);
+
+      var heroHtml = '';
+      if (images.length > 0 && images[0] && images[0].url) {
+        var firstImg = images[0];
+        var hW = Number(firstImg.width) || 800;
+        var hH = Number(firstImg.height) || 500;
+        heroHtml =
+          '<figure class="' + TW.heroFigure + '">' +
+            '<img alt="' + escapeHtml(firstImg.alt || article.title) + '" class="' + TW.heroImg + '" decoding="sync" fetchpriority="high" height="' + hH + '" loading="eager" src="' + escapeHtml(firstImg.url) + '" style="aspect-ratio: ' + hW + ' / ' + hH + ';" width="' + hW + '"/>' +
+            '<figcaption class="' + TW.figureCaption + '">' + escapeHtml(firstImg.title || firstImg.alt || article.title) + '</figcaption>' +
+          '</figure>';
+      }
+
+      var paragraphs = [];
+      for (var i = 0; i < sentences.length; i += 3) {
+        paragraphs.push(sentences.slice(i, i + 3).join(' '));
+      }
+
+      var extraImages = images.slice(1);
+      var imgIndex = 0;
+      var imgStride = extraImages.length > 0
+        ? Math.max(2, Math.floor(paragraphs.length / (extraImages.length + 1)))
+        : 999999;
+
+      var contentBlocks = [];
+      for (var p = 0; p < paragraphs.length; p++) {
+        contentBlocks.push('<p class="' + TW.sentenceParagraph + '">' + escapeHtml(paragraphs[p]) + '</p>');
+        if (imgIndex < extraImages.length && ((p + 1) % imgStride === 0)) {
+          var diag = extraImages[imgIndex++];
+          if (diag && diag.url) {
+            var dW = Number(diag.width) || 700;
+            var dH = Number(diag.height) || 440;
+            contentBlocks.push(
+              '<figure class="' + TW.inlineFigure + '">' +
+                '<img alt="' + escapeHtml(diag.alt || diag.title || article.title) + '" class="' + TW.inlineImg + '" decoding="async" height="' + dH + '" loading="lazy" src="' + escapeHtml(diag.url) + '" style="aspect-ratio: ' + dW + ' / ' + dH + ';" width="' + dW + '"/>' +
+                '<figcaption class="' + TW.figureCaption + '">' + escapeHtml(diag.title || diag.alt || article.title) + '</figcaption>' +
+              '</figure>'
+            );
+          }
+        }
+      }
+
+      while (imgIndex < extraImages.length) {
+        var remImg = extraImages[imgIndex++];
+        if (remImg && remImg.url) {
+          var rW = Number(remImg.width) || 700;
+          var rH = Number(remImg.height) || 440;
+          contentBlocks.push(
+            '<figure class="' + TW.inlineFigure + '">' +
+              '<img alt="' + escapeHtml(remImg.alt || remImg.title || article.title) + '" class="' + TW.inlineImg + '" decoding="async" height="' + rH + '" loading="lazy" src="' + escapeHtml(remImg.url) + '" style="aspect-ratio: ' + rW + ' / ' + rH + ';" width="' + rW + '"/>' +
+              '<figcaption class="' + TW.figureCaption + '">' + escapeHtml(remImg.title || remImg.alt || article.title) + '</figcaption>' +
+            '</figure>'
+          );
+        }
+      }
+
+      mainEl.innerHTML =
+        '<article class="' + TW.articleContainer + '">' +
+          '<nav aria-label="Breadcrumb" class="' + TW.breadcrumb + '">' +
+            '<a class="' + TW.breadcrumbLink + '" data-route="home" href="/">Home</a>' +
+            '<span>/</span>' +
+            '<a class="' + TW.breadcrumbLink + '" data-route="category" data-category="' + escapeHtml(catSlug) + '" href="' + escapeHtml(categoryHref) + '">' + escapeHtml(catLabel) + '</a>' +
+            '<span>/</span>' +
+            '<span aria-current="page" class="text-slate-800 font-semibold">' + escapeHtml(article.title) + '</span>' +
+          '</nav>' +
+          '<header>' +
+            '<a class="' + TW.categoryBadge + '" data-route="category" data-category="' + escapeHtml(catSlug) + '" href="' + escapeHtml(categoryHref) + '">' + escapeHtml(catLabel) + '</a>' +
+            '<h1 class="' + TW.articleTitle + '">' + escapeHtml(article.title) + '</h1>' +
+          '</header>' +
+          heroHtml +
+          '<div class="' + TW.sentencesWrapper + '" id="article-json-sentences">' +
+            contentBlocks.join('') +
+          '</div>' +
+        '</article>' +
+        '<div id="article-related-posts-mount"></div>' +
+        '<div id="article-related-links-mount"></div>';
+
+      var metaDesc = article.metaDesc || article.meta_desc || (sentences.slice(0, 2).join(' ').slice(0, 157));
+      document.title = article.title + ' - ' + csr.blogTitle;
+      setCanonicalUrl(articleCanonicalUrl);
+      setHeadMeta('meta-robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1');
+      setHeadMeta('meta-seo', metaDesc);
+
+      var imageUrls = images.map(function(img) { return img && img.url; }).filter(Boolean);
+      setJsonLd('json-ld-schema', {
+        '@context': 'https://schema.org',
+        '@type': 'Article',
+        'mainEntityOfPage': { '@type': 'WebPage', '@id': articleCanonicalUrl },
+        'headline': article.title,
+        'description': metaDesc,
+        'image': imageUrls,
+        'articleSection': catLabel,
+        'datePublished': toIsoDate(article.createdAt || article.created_at),
+        'dateModified': toIsoDate(article.updatedAt || article.updated_at || article.createdAt || article.created_at),
+        'author': { '@type': 'Organization', 'name': csr.blogTitle, 'url': csr.vercelOrigin + '/' },
+        'publisher': { '@type': 'Organization', 'name': csr.blogTitle, 'url': csr.vercelOrigin + '/' }
+      });
+
+      setJsonLd('json-ld-breadcrumb', {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        'itemListElement': [
+          { '@type': 'ListItem', 'position': 1, 'name': 'Home', 'item': csr.vercelOrigin + '/' },
+          { '@type': 'ListItem', 'position': 2, 'name': catLabel, 'item': categoryCanonicalUrl },
+          { '@type': 'ListItem', 'position': 3, 'name': article.title, 'item': articleCanonicalUrl }
+        ]
+      });
+
+      fetchAndRenderRelatedPostsDeferred(articleSlug);
+      fetchAndRenderRelatedLinksDeferred(articleSlug);
+    }
+
+    function buildPostCardHtml(post, idx) {
+      var postHref = buildArticleHref(post.category, post.slug);
+      var catHref = buildCategoryHref(post.category);
+      var imgUrl = post.thumbnail || post.image || '';
+      var isPriorityImg = idx < 3;
+
+      var imageBlock = imgUrl
+        ? '<a class="' + TW.cardImgLink + '" data-route="article" data-category="' + escapeHtml(post.category) + '" data-slug="' + escapeHtml(post.slug) + '" href="' + escapeHtml(postHref) + '">' +
+            '<img alt="' + escapeHtml(post.imageAlt || post.title) + '" class="' + TW.cardImg + '" decoding="' + (isPriorityImg ? 'sync' : 'async') + '" fetchpriority="' + (isPriorityImg ? 'high' : 'auto') + '" height="400" loading="' + (isPriorityImg ? 'eager' : 'lazy') + '" src="' + escapeHtml(imgUrl) + '" style="aspect-ratio: 640 / 400;" width="640"/>' +
+          '</a>'
+        : '';
+
+      return (
+        '<article class="' + TW.postCard + '">' +
+          imageBlock +
+          '<div class="' + TW.cardBody + '">' +
+            '<div>' +
+              '<a class="' + TW.cardCatLink + '" data-route="category" data-category="' + escapeHtml(post.category) + '" href="' + escapeHtml(catHref) + '">' + escapeHtml(post.categoryLabel || post.category) + '</a>' +
+              '<h2 class="' + TW.cardTitle + '">' +
+                '<a data-route="article" data-category="' + escapeHtml(post.category) + '" data-slug="' + escapeHtml(post.slug) + '" href="' + escapeHtml(postHref) + '">' + escapeHtml(post.title) + '</a>' +
+              '</h2>' +
+              '<p class="' + TW.cardExcerpt + '">' + escapeHtml(post.excerpt || '') + '</p>' +
+            '</div>' +
+            '<a class="' + TW.cardReadMore + '" data-route="article" data-category="' + escapeHtml(post.category) + '" data-slug="' + escapeHtml(post.slug) + '" href="' + escapeHtml(postHref) + '">Read article &#8594;</a>' +
+          '</div>' +
+        '</article>'
+      );
+    }
+
+    /**
+     * PAGE 2: HOMEPAGE (`/`)
+     */
+    function renderHomepage(data) {
+      var articles = (data && Array.isArray(data.articles)) ? data.articles : [];
+      var activeQuery = csr.q || (data && data.query) || '';
+
+      var cardsHtml = articles.length > 0
+        ? articles.map(function(post, idx) { return buildPostCardHtml(post, idx); }).join('')
+        : '<div class="col-span-full bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-600">' +
+            'No matching technical articles found' + (activeQuery ? ' for "' + escapeHtml(activeQuery) + '"' : '') + '.' +
+          '</div>';
+
+      var subtitleText = activeQuery
+        ? 'Search results for "' + escapeHtml(activeQuery) + '" across global category databases.'
+        : 'Random technical guides and reference diagrams from global databases.';
+
+      var clearSearchHtml = activeQuery
+        ? '<a class="text-xs font-semibold text-blue-600 hover:underline cursor-pointer" data-route="home" href="/">Clear search &#10005;</a>'
+        : '';
+
+      mainEl.innerHTML =
+        '<section>' +
+          '<header class="' + TW.sectionHeader + '">' +
+            '<div>' +
+              '<h1 class="' + TW.sectionTitle + '">' + escapeHtml(csr.blogTitle) + '</h1>' +
+              '<p class="' + TW.sectionDesc + '">' + subtitleText + '</p>' +
+            '</div>' +
+            clearSearchHtml +
+          '</header>' +
+          '<div class="' + TW.postsGrid + '">' + cardsHtml + '</div>' +
+        '</section>';
+
+      var homeCanonicalUrl = csr.vercelOrigin + '/';
+      document.title = activeQuery ? ('Search: ' + activeQuery + ' - ' + csr.blogTitle) : csr.blogTitle;
+      setCanonicalUrl(homeCanonicalUrl);
+      setHeadMeta('meta-robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1');
+      setHeadMeta('meta-seo', csr.blogDescription);
+      removeHeadElement('json-ld-breadcrumb');
+
+      setJsonLd('json-ld-schema', {
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        'name': csr.blogTitle,
+        'url': homeCanonicalUrl,
+        'description': csr.blogDescription,
+        'mainEntity': {
+          '@type': 'ItemList',
+          'itemListElement': articles.slice(0, 10).map(function(item, index) {
+            return {
+              '@type': 'ListItem',
+              'position': index + 1,
+              'name': item.title,
+              'url': buildArticleCanonicalUrl(item.category, item.slug)
+            };
+          })
+        }
+      });
+    }
+
+    /**
+     * PAGE 3: CATEGORY PAGE (`/?category=<category>`)
+     *   - <head>: 2 Meta Only (`meta robots` and `meta seo`) — ZERO JSON-LD
+     */
+    function renderCategoryPage(data) {
+      var articles = (data && Array.isArray(data.articles)) ? data.articles : [];
+      var catSlug = (data && data.category) || csr.category;
+      var catLabel = (data && data.categoryLabel) || catSlug.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      var catCanonicalUrl = buildCategoryCanonicalUrl(catSlug);
+      var catDesc = 'Explore random ' + catLabel + ' technical guides and diagrams on ' + csr.blogTitle + '.';
+
+      var cardsHtml = articles.map(function(post, idx) {
+        return buildPostCardHtml(post, idx);
+      }).join('');
+
+      mainEl.innerHTML =
+        '<section>' +
+          '<header class="' + TW.sectionHeader + '">' +
+            '<div>' +
+              '<h1 class="' + TW.sectionTitle + '">' + escapeHtml(catLabel) + '</h1>' +
+              '<p class="' + TW.sectionDesc + '">' + escapeHtml(catDesc) + '</p>' +
+            '</div>' +
+            '<a class="text-xs font-semibold text-blue-600 hover:underline cursor-pointer" data-route="home" href="/">&#8592; All Categories</a>' +
+          '</header>' +
+          '<div class="' + TW.postsGrid + '">' + cardsHtml + '</div>' +
+        '</section>';
+
+      document.title = catLabel + ' - ' + csr.blogTitle;
+      setCanonicalUrl(catCanonicalUrl);
+      setHeadMeta('meta-robots', 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1');
+      setHeadMeta('meta-seo', catDesc);
+
+      removeHeadElement('json-ld-schema');
+      removeHeadElement('json-ld-breadcrumb');
+    }
+
+    /**
+     * PAGE 4: SITEMAP XML INSPECTOR & VERCEL SERVERLESS PREVIEW (`/sitemap.xml`)
+     * Shows the exact XML generated by `/api/sitemap.js` after rewriting the backend
+     * `<loc>` URLs to the active Vercel subdomain address (`csr.vercelOrigin`).
+     */
+    function renderSitemapXmlView(rawBackendXml) {
+      var xmlString = typeof rawBackendXml === 'string' && rawBackendXml.indexOf('<urlset') !== -1
+        ? rawBackendXml
+        : buildSampleBackendSitemapXml();
+
+      var rewrittenXml = rewriteBackendSitemapXmlToVercelOrigin(xmlString, csr.vercelOrigin);
+      var sitemapCanonicalUrl = csr.vercelOrigin + '/sitemap.xml';
+
+      document.title = 'XML Sitemap (application/xml) - ' + csr.blogTitle;
+      setCanonicalUrl(sitemapCanonicalUrl);
+      setHeadMeta('meta-robots', 'noindex, follow');
+      setHeadMeta('meta-seo', 'Vercel Serverless XML Sitemap rewritten to ' + csr.vercelOrigin);
+      removeHeadElement('json-ld-schema');
+      removeHeadElement('json-ld-breadcrumb');
+
+      // Extract rewritten <loc> URLs so user can also click and test them directly
+      var locMatches = [];
+      var locRegex = /<loc>\s*([^<\s]+)\s*<\/loc>/gi;
+      var m;
+      while ((m = locRegex.exec(rewrittenXml)) !== null) {
+        locMatches.push(m[1].replace(/&amp;/g, '&'));
+      }
+
+      var clickableLocsHtml = locMatches.slice(0, 12).map(function(locUrl) {
+        var parsedCat = '';
+        var parsedSlug = '';
+        try {
+          var u = new URL(locUrl);
+          parsedCat = u.searchParams.get('category') || '';
+          parsedSlug = u.searchParams.get('slug') || '';
+        } catch (e) {}
+        return (
+          '<li class="py-1.5 flex items-center justify-between gap-2 text-xs font-mono border-b border-slate-100 last:border-0">' +
+            '<a class="text-blue-600 hover:underline truncate cursor-pointer" data-route="article" data-category="' + escapeHtml(parsedCat) + '" data-slug="' + escapeHtml(parsedSlug) + '" href="' + escapeHtml(buildArticleHref(parsedCat, parsedSlug)) + '">' +
+              escapeHtml(locUrl) +
+            '</a>' +
+            '<span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] shrink-0">Origin Rewritten</span>' +
+          '</li>'
+        );
+      }).join('');
+
+      mainEl.innerHTML =
+        '<div class="max-w-4xl mx-auto space-y-6">' +
+          '<section class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-8">' +
+            '<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-200">' +
+              '<div>' +
+                '<span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-blue-50 text-blue-700 mb-1">Content-Type: application/xml; charset=UTF-8</span>' +
+                '<h1 class="text-xl sm:text-2xl font-extrabold text-slate-900">Vercel Serverless XML Sitemap (<code class="font-mono text-lg">/sitemap.xml</code>)</h1>' +
+                '<p class="mt-1 text-xs sm:text-sm text-slate-600">' +
+                  'Reads <code class="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">' + escapeHtml(csr.apiEndpoint) + '/sitemap.xml</code> and rewrites all <code class="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded">&lt;loc&gt;</code> origins to <code class="font-mono text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">' + escapeHtml(csr.vercelOrigin) + '</code>.' +
+                '</p>' +
+              '</div>' +
+              '<a href="/sitemap.xml" target="_blank" rel="noopener" class="px-3.5 py-2 rounded-xl bg-slate-900 text-white text-xs font-mono font-semibold hover:bg-blue-600 transition-colors shrink-0 self-start">' +
+                'Open Raw /sitemap.xml &#8599;' +
+              '</a>' +
+            '</div>' +
+            '<div class="mb-5">' +
+              '<h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Rewritten Sitemap &lt;loc&gt; Entries (Click to test CSR Article Route)</h2>' +
+              '<ul class="bg-slate-50 rounded-xl border border-slate-200 px-4 py-2">' +
+                clickableLocsHtml +
+              '</ul>' +
+            '</div>' +
+            '<div>' +
+              '<h2 class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Raw XML Output (<code class="font-mono">application/xml</code>)</h2>' +
+              '<pre class="p-4 rounded-xl bg-slate-900 text-emerald-300 font-mono text-xs overflow-x-auto leading-relaxed max-h-[420px]"><code>' + escapeHtml(rewrittenXml) + '</code></pre>' +
+            '</div>' +
+          '</section>' +
+        '</div>';
+    }
+
+    function renderCategoryNavPills(categories) {
+      if (Array.isArray(categories) && categories.length > 0) {
+        cachedCategories = categories;
+      }
+      if (!navEl) return;
+
+      // Single Article Page: NO categories listing in header nav
+      if (csr.pageMode === 'article') {
+        navEl.innerHTML =
+          '<a class="' + TW.navLink + '" data-route="home" href="/">Home</a>' +
+          '<a class="' + TW.navLink + ' font-mono" data-route="sitemap" href="/sitemap.xml">sitemap.xml</a>';
+        return;
+      }
+
+      var activeCat = (csr.category || '').toLowerCase();
+      var isHome = csr.pageMode === 'home' && !activeCat;
+      var isSitemap = csr.pageMode === 'sitemap';
+
+      var links = [
+        '<a class="' + (isHome ? TW.navLinkActive : TW.navLink) + '" data-route="home" href="/">Home</a>',
+        '<a class="' + (isSitemap ? TW.navLinkActive : TW.navLink) + ' font-mono" data-route="sitemap" href="/sitemap.xml">sitemap.xml</a>'
+      ];
+
+      for (var i = 0; i < cachedCategories.length; i++) {
+        var c = cachedCategories[i];
+        if (!c || !c.category) continue;
+        var isCurrent = csr.pageMode === 'category' && activeCat === String(c.category).toLowerCase();
+        links.push(
+          '<a class="' + (isCurrent ? TW.navLinkActive : TW.navLink) + '" data-route="category" data-category="' + escapeHtml(c.category) + '" href="' + escapeHtml(buildCategoryHref(c.category)) + '">' +
+            escapeHtml(c.label || c.category) +
+          '</a>'
+        );
+      }
+      navEl.innerHTML = links.join('');
+    }
+
+    function ensureCategoriesLoadedDeferred() {
+      if (csr.pageMode === 'article') return;
+      if (cachedCategories.length > 0) {
+        renderCategoryNavPills(cachedCategories);
+        return;
+      }
+      fetch(csr.apiEndpoint + '/api/categories', {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'low'
+      })
+        .then(function(r) { return r.ok ? r.json() : { categories: FALLBACK_CATEGORIES }; })
+        .catch(function() { return { categories: FALLBACK_CATEGORIES }; })
+        .then(function(data) {
+          if (data && Array.isArray(data.categories)) {
+            renderCategoryNavPills(data.categories);
+          }
+        });
+    }
+
+    function renderPayloadForCurrentMode(payload) {
+      if (payload && typeof payload === 'object' && Array.isArray(payload.categories) && payload.categories.length > 0) {
+        cachedCategories = payload.categories;
+      }
+      if (csr.pageMode === 'article') {
+        renderSingleArticle(payload);
+      } else if (csr.pageMode === 'category') {
+        renderCategoryPage(payload);
+        ensureCategoriesLoadedDeferred();
+      } else if (csr.pageMode === 'sitemap') {
+        renderSitemapXmlView(payload);
+        ensureCategoriesLoadedDeferred();
+      } else {
+        renderHomepage(payload);
+        renderCategoryNavPills(cachedCategories);
+      }
+    }
+
+    function navigateToRoute(newRoute, pushHistory) {
+      csr.pageMode = newRoute.pageMode;
+      csr.category = newRoute.category || '';
+      csr.slug = newRoute.slug || '';
+      csr.q = newRoute.q || '';
+      csr.canonicalUrl = csr.buildCanonicalForRoute(newRoute);
+
+      if (searchInputEl) {
+        searchInputEl.value = csr.q;
+      }
+
+      setCanonicalUrl(csr.canonicalUrl);
+
+      if (pushHistory) {
+        var targetUrl = '/';
+        if (newRoute.pageMode === 'article') {
+          targetUrl = '/?category=' + encodeURIComponent(newRoute.category) + '&slug=' + encodeURIComponent(newRoute.slug);
+        } else if (newRoute.pageMode === 'category') {
+          targetUrl = '/?category=' + encodeURIComponent(newRoute.category) + (newRoute.q ? '&q=' + encodeURIComponent(newRoute.q) : '');
+        } else if (newRoute.pageMode === 'sitemap') {
+          targetUrl = '/?page=sitemap';
+        } else if (newRoute.q) {
+          targetUrl = '/?q=' + encodeURIComponent(newRoute.q);
+        }
+        try {
+          window.history.pushState(newRoute, '', targetUrl);
+        } catch (e) {}
+      }
+
+      window.scrollTo(0, 0);
+
+      var endpointUrl = csr.buildPrimaryApiUrl(newRoute);
+      if (newRoute.pageMode === 'sitemap') {
+        fetch(endpointUrl, {
+          method: 'GET',
+          headers: { 'Accept': 'application/xml, text/xml, */*' },
+          priority: 'high'
+        })
+          .then(function(res) {
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            return res.text();
+          })
+          .then(function(xmlText) {
+            renderPayloadForCurrentMode(xmlText);
+          })
+          .catch(function() {
+            renderPayloadForCurrentMode(buildSampleBackendSitemapXml());
+          });
+        return;
+      }
+
+      fetch(endpointUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        priority: 'high'
+      })
+        .then(function(res) {
+          if (!res.ok) {
+            var err = new Error('HTTP ' + res.status);
+            err.status = res.status;
+            throw err;
+          }
+          return res.json();
+        })
+        .then(function(payload) {
+          renderPayloadForCurrentMode(payload);
+        })
+        .catch(function(err) {
+          if (err && err.status === 404) {
+            setHeadMeta('meta-robots', 'noindex, nofollow');
+            mainEl.innerHTML =
+              '<section class="max-w-xl mx-auto bg-white rounded-2xl border border-slate-200 p-8 text-center">' +
+                '<h1 class="text-lg font-bold text-slate-900">Content Not Found (404)</h1>' +
+                '<p class="mt-2 text-sm text-slate-600">The requested category or technical article was not found on ' + escapeHtml(csr.apiEndpoint) + '.</p>' +
+                '<a class="mt-4 inline-block px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer" data-route="home" href="/">Back to Home</a>' +
+              '</section>';
+            return;
+          }
+          var fallbackData = buildFallbackPayloadForRoute(newRoute);
+          renderPayloadForCurrentMode(fallbackData);
+        });
+    }
+
+    if (searchFormEl) {
+      searchFormEl.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var qVal = searchInputEl ? String(searchInputEl.value || '').trim() : '';
+        var targetMode = csr.pageMode === 'category' && csr.category ? 'category' : 'home';
+        navigateToRoute({
+          pageMode: targetMode,
+          category: targetMode === 'category' ? csr.category : '',
+          slug: '',
+          q: qVal
+        }, true);
+      });
+    }
+
+    document.addEventListener('click', function(e) {
+      var anchor = e.target && e.target.closest ? e.target.closest('a[data-route]') : null;
+      if (!anchor) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+      var routeType = anchor.getAttribute('data-route');
+      if (!routeType) return;
+
+      e.preventDefault();
+      if (routeType === 'article') {
+        navigateToRoute({
+          pageMode: 'article',
+          category: anchor.getAttribute('data-category') || '',
+          slug: anchor.getAttribute('data-slug') || '',
+          q: ''
+        }, true);
+      } else if (routeType === 'category') {
+        navigateToRoute({
+          pageMode: 'category',
+          category: anchor.getAttribute('data-category') || '',
+          slug: '',
+          q: ''
+        }, true);
+      } else if (routeType === 'sitemap') {
+        navigateToRoute({
+          pageMode: 'sitemap',
+          category: '',
+          slug: '',
+          q: ''
+        }, true);
+      } else {
+        navigateToRoute({
+          pageMode: 'home',
+          category: '',
+          slug: '',
+          q: ''
+        }, true);
+      }
+    });
+
+    window.addEventListener('popstate', function() {
+      var route = csr.resolveRouteFromLocation();
+      navigateToRoute(route, false);
+    });
+
+    if (csr.dataPromise) {
+      csr.dataPromise
+        .then(function(payload) {
+          renderPayloadForCurrentMode(payload);
+        })
+        .catch(function(err) {
+          if (err && err.status === 404) {
+            setHeadMeta('meta-robots', 'noindex, nofollow');
+            mainEl.innerHTML =
+              '<section class="max-w-xl mx-auto bg-white rounded-2xl border border-slate-200 p-8 text-center">' +
+                '<h1 class="text-lg font-bold text-slate-900">Content Not Found (404)</h1>' +
+                '<p class="mt-2 text-sm text-slate-600">The requested category or technical article was not found on ' + escapeHtml(csr.apiEndpoint) + '.</p>' +
+                '<a class="mt-4 inline-block px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold cursor-pointer" data-route="home" href="/">Back to Home</a>' +
+              '</section>';
+            return;
+          }
+          var initialRoute = csr.resolveRouteFromLocation();
+          var fallbackPayload = buildFallbackPayloadForRoute(initialRoute);
+          renderPayloadForCurrentMode(fallbackPayload);
+        });
+    }
+  })();
+  </script>
+</body>
+</html>
